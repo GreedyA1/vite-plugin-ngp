@@ -34,7 +34,7 @@ Each entry records one choice: what we decided, why, what it costs, and when to 
 
 **Why.** The delta streams every file in the program again after each edit: 465 ms at 5,000 components. The analyzer's stale set over-approximates, marking 202 files when 1 or 2 changed. Vite asks again only for the modules the page still uses.
 
-**Cost.** The plugin depends on `HybridCompiler.fileCache` and the analyzer object, which are below ngp's intended API.
+**Cost.** The plugin depends on `HybridCompiler.applyInvalidations` and the analyzer object, which are below ngp's intended API. Until 22.3.0-rc.0 it deleted from `HybridCompiler.fileCache` directly; rc.0 added a second per-file cache that this missed, and `applyInvalidations` clears both.
 
 **Revisit when** ngp offers an update that doesn't run the delta.
 
@@ -84,13 +84,13 @@ Each entry records one choice: what we decided, why, what it costs, and when to 
 
 ## 8. Pin Angular to one exact prerelease
 
-*16 October 2026, moved to 22.3.0-next.4 on 6 November 2026*
+*16 October 2026, moved to 22.3.0-next.4 on 6 November 2026 and to 22.3.0-rc.0 on 17 November 2026*
 
-**Decision.** Every `@angular/*` dependency is pinned to the exact release built from the Angular commit ngp is built from. Today that's `22.3.0-next.4`, commit `b355f62`; [toolchain/versions.env](../toolchain/versions.env) holds both, and nothing that describes the current setup may name a different Angular version. A measured number keeps the version it was measured on, and says so, until it's measured again.
+**Decision.** Every `@angular/*` dependency is pinned to the exact release built from the Angular commit ngp is built from. Today that's `22.3.0-rc.0`, commit `9f2e1aa`; [toolchain/versions.env](../toolchain/versions.env) holds both, and nothing that describes the current setup may name a different Angular version. A measured number keeps the version it was measured on, and says so, until it's measured again.
 
 **Why.** ngp's backend imports compiler-cli's private `hybrid_analysis` API, which has to come from the same commit.
 
-**Cost.** Moving to a newer Angular means rebuilding ngp at that commit and updating every pin together. It isn't mechanical: the three weeks between `22.3.0-next.2` and `22.3.0-next.4` changed how the analyzer treats a file that comes back after a delete, which the plugin had to answer (decision 25), and gave ngp Angular's extended diagnostics, which the plugin now reports.
+**Cost.** Moving to a newer Angular means rebuilding ngp at that commit and updating every pin together. It isn't mechanical: the three weeks between `22.3.0-next.2` and `22.3.0-next.4` changed how the analyzer treats a file that comes back after a delete, which the plugin had to answer (decision 25), and gave ngp Angular's extended diagnostics, which the plugin now reports. The move from `22.3.0-next.4` to `22.3.0-rc.0` broke three things. ngp's HMR helpers moved into `@angular/compiler`, which next.4 doesn't export, so ngp from that commit doesn't build against older packages. `getTcbForFile` became async when upstream dropped the synchronous APIs. And `HybridCompiler` started keeping each file's analyzer metadata in a second cache, so clearing `fileCache` alone left type-check blocks built from the file as it was before the edit. Pinning ngp and the packages to the same release keeps all three from reaching users.
 
 ## 9. JIT fallback in the playground until there's a linker
 

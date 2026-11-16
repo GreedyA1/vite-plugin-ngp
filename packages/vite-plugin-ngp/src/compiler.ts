@@ -351,12 +351,18 @@ export class NgpCompiler {
     return run;
   }
 
-  /** Drops the analyzer's stale files from ngp's cache, and returns the TypeScript ones. */
+  /**
+   * Drops the analyzer's stale files from ngp's caches, and returns the TypeScript ones.
+   * applyInvalidations clears both of ngp's per-file caches, the analysis and the analyzer
+   * metadata it keeps since 22.3.0-rc.0; clearing only the first leaves type-check blocks
+   * generated from the file as it was.
+   */
   private dropStale(file: string, invalidated: string[]): string[] {
     const stale = invalidated.filter((f) => f.endsWith('.ts')).map((f) => path.resolve(f));
-    for (const f of [...stale, file]) {
-      this.hybrid.fileCache.delete(f);
-      this.typeCheckHybrid.fileCache.delete(f);
+    const dropped = [...stale, file];
+    this.hybrid.applyInvalidations([], dropped);
+    this.typeCheckHybrid.applyInvalidations([], dropped);
+    for (const f of dropped) {
       this.tcbs.delete(f);
     }
     return stale;
@@ -364,8 +370,8 @@ export class NgpCompiler {
 
   /**
    * The type-check block of each file that has one, generated only for files that changed since
-   * the last call. ngp generates blocks synchronously, so this yields to the event loop between
-   * files to keep transforms flowing.
+   * the last call. Most of a block's work is synchronous even though ngp's call is async, so this
+   * yields to the event loop between files to keep transforms flowing.
    */
   async typeCheckBlocks(files: Iterable<string>): Promise<Map<string, string>> {
     await this.updates;
@@ -374,7 +380,7 @@ export class NgpCompiler {
       let tcb = this.tcbs.get(file);
       if (tcb === undefined) {
         await new Promise((resolve) => setImmediate(resolve));
-        tcb = this.typeCheckHybrid.getTcbForFile(file);
+        tcb = await this.typeCheckHybrid.getTcbForFile(file);
         this.tcbs.set(file, tcb);
       }
       if (tcb) {
