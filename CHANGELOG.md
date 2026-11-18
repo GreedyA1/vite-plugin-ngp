@@ -1,3 +1,17 @@
+## 0.4.0 (2026-11-18)
+
+### 📦 Build
+
+- ⚠️  **vite-plugin-ngp:** move Angular to 22.3.0-rc.0 ([#45](https://github.com/push-based/vite-plugin-ngp/pull/45))
+
+### ⚠️  Breaking Changes
+
+- **vite-plugin-ngp:** move Angular to 22.3.0-rc.0  ([#45](https://github.com/push-based/vite-plugin-ngp/pull/45))
+
+### ❤️ Thank You
+
+- Christopher Holder @ChristopherPHolder
+
 ## 0.3.0 (2026-11-10)
 
 ### 🚀 Features
