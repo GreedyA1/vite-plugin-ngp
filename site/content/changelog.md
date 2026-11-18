@@ -7,6 +7,13 @@ description: What changed in vite-plugin-ngp, newest first, for anyone following
 
 What changed in vite-plugin-ngp, newest first, written for people using it. Every entry links to the page that documents it. Versions on npm, with the commits in each, are in the repo's [CHANGELOG.md](https://github.com/push-based/vite-plugin-ngp/blob/main/CHANGELOG.md) and its [GitHub releases](https://github.com/push-based/vite-plugin-ngp/releases).
 
+## 17 November 2026
+
+### Angular
+
+- The plugin moved from Angular `22.3.0-next.4` to `22.3.0-rc.0`, and the ngp it carries is built from the commit that release was cut at. Move every `@angular/*` package in your app with it: the pin is still exact. [Getting started](getting-started)
+- The newer ngp fixes code it compiled differently from `ng build`: a generated import alias (`i0`, `i1`, …) that clashed with a name already in the file, `import x = …` statements that weren't hoisted with the other imports, `hostDirectives` entries that could be dropped, and globals declared in a `.d.ts` file the tsconfig includes that didn't resolve. Angular itself now reports an unknown property bound on an explicit `<ng-template>`, under `ng build` too, so a template that compiled on next.4 can fail on rc.0. [Status](status)
+
 ## 10 November 2026
 
 ### Fixes

@@ -66,7 +66,7 @@ That draws the figures on the docs site's Performance and Benchmarks pages into 
 
 ## The tools, and how each is set up
 
-Every tool runs from `bench/node_modules` with Angular 22.3.0-next.4, the version ngp is built from, and the three Vite plugins with Vite 8.3.4. Each one gets its README's setup and nothing else, written into the app by [lib/tools.mjs](lib/tools.mjs). The only additions are a separate `cacheDir` and `build.outDir` per tool, so no tool reuses another's dependency cache or output.
+Every tool runs from `bench/node_modules` with Angular 22.3.0-rc.0, the version ngp is built from, and the three Vite plugins with Vite 8.3.4. Each one gets its README's setup and nothing else, written into the app by [lib/tools.mjs](lib/tools.mjs). The only additions are a separate `cacheDir` and `build.outDir` per tool, so no tool reuses another's dependency cache or output.
 
 | Tool | Dev | Build | Type-checks? |
 |---|---|---|---|
@@ -102,7 +102,7 @@ node real.mjs super-productivity
 node real.mjs ghostfolio
 ```
 
-That clones each app at its commit into `.work/real.noindex/`, pins every `@angular/*` package to `22.3.0-next.4`, runs the app's own install, applies the patch, writes a root `index.html` from the app's own plus the stylesheet links and entry script its CLI injects, and copies `vite.config.ngp.mjs` and its helpers in. Then:
+That clones each app at its commit into `.work/real.noindex/`, pins every `@angular/*` package to `22.3.0-rc.0`, runs the app's own install, applies the patch, writes a root `index.html` from the app's own plus the stylesheet links and entry script its CLI injects, and copies `vite.config.ngp.mjs` and its helpers in. Then:
 
 ```bash
 NGP_TOOLCHAIN="$PWD/../toolchain/out" node run.mjs --apps super-productivity,ghostfolio --tools ngp,cli,nx

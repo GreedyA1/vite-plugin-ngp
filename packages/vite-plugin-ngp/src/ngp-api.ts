@@ -1,5 +1,5 @@
 // The slice of ngp's API this plugin uses, typed by hand. ngp isn't published, so there's no
-// package to take types from; these match `toolchain/out/preprocessor/api.js` at Angular b355f62.
+// package to take types from; these match `toolchain/out/preprocessor/api.js` at Angular 9f2e1aa (22.3.0-rc.0).
 
 import {existsSync} from 'node:fs';
 import * as fs from 'node:fs/promises';
@@ -62,17 +62,20 @@ export interface Analyzer {
 
 export interface HybridCompiler {
   readonly analyzer: Analyzer;
-  /** Per-file analysis cache, keyed by the analyzer's file path. */
-  readonly fileCache: Map<string, unknown>;
+  /**
+   * Drops ngp's cached analysis and metadata for `invalidatedTsFiles`, for invalidations already
+   * sent to the analyzer directly. With no `updates`, nothing is recorded for incremental emit.
+   */
+  applyInvalidations(updates: readonly {filePath: string; updateType: FileUpdateType}[], invalidatedTsFiles: readonly string[]): void;
   /** `metadata` is the analyzer's result for the file, if already fetched; ngp looks it up otherwise. */
   processFile(filePath: string, content: string, metadata?: NonNullable<Awaited<ReturnType<Analyzer['getMetadataForFile']>>>): Promise<ProcessedFile>;
   /** The update module for one component, as TypeScript, or null if HMR is off. */
   emitHmrUpdateModule(filePath: string, className: string): Promise<string | null>;
   /**
    * The file's type-check block (what the CLI writes as `.ngtypecheck.ts`), or null if the file
-   * has no components or directives to check. Cached in `fileCache`. Optimize mode only.
+   * has no components or directives to check. Cached until the file is invalidated. Optimize mode only.
    */
-  getTcbForFile(filePath: string): string | null;
+  getTcbForFile(filePath: string): Promise<string | null>;
   /**
    * What's wrong with the tsconfig's `angularCompilerOptions`, found when the compiler is built
    * and never part of `processFile`'s diagnostics: an `extendedDiagnostics` check or category
