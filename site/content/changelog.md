@@ -7,6 +7,12 @@ description: What changed in vite-plugin-ngp, newest first, for anyone following
 
 What changed in vite-plugin-ngp, newest first, written for people using it. Every entry links to the page that documents it. Versions on npm, with the commits in each, are in the repo's [CHANGELOG.md](https://github.com/push-based/vite-plugin-ngp/blob/main/CHANGELOG.md) and its [GitHub releases](https://github.com/push-based/vite-plugin-ngp/releases).
 
+## 24 November 2026
+
+### Fixes
+
+- In the dev server, Angular libraries are now linked in server environments the plugin doesn't own, such as the Worker environment `@cloudflare/vite-plugin` adds. The dev server used to stop on startup asking for the JIT compiler, because that environment pre-bundled the libraries without the linker, and the transform skipped libraries served with a `?v=` query. `vite build` was not affected. [How it works](how-it-works#linking-libraries), [Server rendering](server-rendering#limits)
+
 ## 17 November 2026
 
 ### Angular
