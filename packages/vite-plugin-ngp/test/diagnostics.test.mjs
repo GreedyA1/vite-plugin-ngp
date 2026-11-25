@@ -3,12 +3,15 @@
 // in the message itself. Run `pnpm build` first; needs an ngp toolchain build.
 
 import assert from 'node:assert/strict';
+import {execFile} from 'node:child_process';
 import * as fs from 'node:fs/promises';
 import {realpathSync} from 'node:fs';
+import {createRequire} from 'node:module';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import {describe, test} from 'node:test';
-import {fileURLToPath} from 'node:url';
+import {test} from 'node:test';
+import {fileURLToPath, pathToFileURL} from 'node:url';
+import {promisify} from 'node:util';
 import {createServer} from 'vite';
 import {NgpCompiler} from '../dist/compiler.js';
 import {ngp} from '../dist/index.js';
@@ -17,7 +20,6 @@ import {copyFixture, recordingLogger, toolchain} from './fixture.mjs';
 const here = path.dirname(fileURLToPath(import.meta.url));
 const repo = path.resolve(here, '../../..');
 const fixture = path.join(here, 'fixtures/file-changes');
-const toolchainDir = toolchain;
 
 /**
  * Compiles `code` as the fixture app's `greeting.ts`, with `angularCompilerOptions` added to the
@@ -38,7 +40,7 @@ async function diagnose(code, angularCompilerOptions = {}) {
   await fs.writeFile(tsconfig, JSON.stringify(config));
   let compiler;
   try {
-    compiler = await NgpCompiler.create({toolchainDir, engine: 'native', tsconfig, analyzerTsconfig: tsconfig, enableHmr: false});
+    compiler = await NgpCompiler.create({toolchainDir: toolchain, engine: 'native', tsconfig, analyzerTsconfig: tsconfig, enableHmr: false});
     return (await compiler.transform(file, code))?.diagnostics ?? [];
   } finally {
     compiler?.close();
@@ -100,11 +102,11 @@ test('a mistyped extendedDiagnostics check fails at startup instead of silently 
 
 // A diagnostic in an external template carries an offset into the .html file. Vite's dev server,
 // which Vitest runs, used to read that offset against the .ts module: past the module's end it
-// threw, so a warning failed the module, and short of it the frame showed the wrong file.
-describe('a diagnostic in an external template', () => {
-  // The interpolated signal sits on line 41, far past the end of the 200-byte component.
-  const template = `${'<p>padding</p>\n'.repeat(40)}<p>{{ count }}</p>\n`;
-  const component = `import {Component, signal} from '@angular/core';
+// threw, so a warning failed the module, and with it every spec that imports it.
+
+// The interpolated signal sits on line 41, far past the end of the 200-byte component.
+const externalTemplate = `${'<p>padding</p>\n'.repeat(40)}<p>{{ count }}</p>\n`;
+const externalComponent = `import {Component, signal} from '@angular/core';
 
 @Component({selector: 'app-greeting', templateUrl: './greeting.html'})
 export class Greeting {
@@ -112,51 +114,84 @@ export class Greeting {
 }
 `;
 
-  /** Serves the fixture with `greeting.html` as above, and transforms `greeting.ts`. */
-  async function transformGreeting(label, angularCompilerOptions = {}) {
-    const root = await copyFixture('file-changes', `diagnostics-${label}`);
-    await fs.writeFile(path.join(root, 'src/app/greeting.ts'), component);
-    await fs.writeFile(path.join(root, 'src/app/greeting.html'), template);
-    const tsconfig = path.join(root, 'tsconfig.json');
-    const config = JSON.parse(await fs.readFile(tsconfig, 'utf8'));
-    config.angularCompilerOptions = {...config.angularCompilerOptions, ...angularCompilerOptions};
-    await fs.writeFile(tsconfig, JSON.stringify(config));
-    const {logger, messages} = recordingLogger();
-    const server = await createServer({
-      root,
-      cacheDir: path.join(root, '.vite'),
-      configFile: false,
-      customLogger: logger,
-      plugins: [ngp({toolchain, typeCheck: false})],
-      server: {middlewareMode: true, ws: false},
-    });
-    try {
-      const outcome = await server.environments.client.transformRequest('/src/app/greeting.ts').then(
-        (result) => ({result}),
-        (error) => ({error}),
-      );
-      return {...outcome, messages};
-    } finally {
-      await server.close();
-      await fs.rm(root, {recursive: true, force: true});
-    }
+/** The fixture app, copied, with `greeting.ts` using the template above and `angularCompilerOptions` added. */
+async function externalTemplateApp(label, angularCompilerOptions = {}) {
+  const root = await copyFixture('file-changes', `diagnostics-${label}`);
+  await fs.writeFile(path.join(root, 'src/app/greeting.ts'), externalComponent);
+  await fs.writeFile(path.join(root, 'src/app/greeting.html'), externalTemplate);
+  const tsconfig = path.join(root, 'tsconfig.json');
+  const config = JSON.parse(await fs.readFile(tsconfig, 'utf8'));
+  config.angularCompilerOptions = {...config.angularCompilerOptions, ...angularCompilerOptions};
+  await fs.writeFile(tsconfig, JSON.stringify(config));
+  return root;
+}
+
+test('under Vitest, a warning in an external template names its line, and the spec still runs', async () => {
+  const root = await externalTemplateApp('vitest');
+  try {
+    await fs.writeFile(
+      path.join(root, 'src/app/greeting.spec.ts'),
+      `import {expect, it} from 'vitest';
+import {Greeting} from './greeting';
+
+it('compiles the component', () => {
+  expect((Greeting as any).ɵcmp).toBeDefined();
+});
+`,
+    );
+    await fs.writeFile(
+      path.join(root, 'vitest.config.mjs'),
+      `import {ngp} from ${JSON.stringify(pathToFileURL(path.join(here, '../dist/index.js')).href)};
+
+export default {
+  cacheDir: '.vite',
+  plugins: [ngp({toolchain: ${JSON.stringify(toolchain)}})],
+  test: {environment: 'node', include: ['src/**/*.spec.ts']},
+};
+`,
+    );
+    const {code, output} = await vitestRun(root);
+    assert.equal(code, 0, output);
+    assert.match(output, /Tests\s+1 passed/);
+    assert.match(output, /src\/app\/greeting\.html:41:7: NG8109: count is a function and should be invoked/);
+  } finally {
+    await fs.rm(root, {recursive: true, force: true});
   }
+});
 
-  test('is a warning that names the template line, and the module still compiles', async () => {
-    const {result, error, messages} = await transformGreeting('warning');
-    assert.equal(error, undefined);
-    assert.match(result.code, /Greeting/);
-    const warning = messages.warnings.find((w) => w.includes('NG8109'));
-    assert.ok(warning, `no NG8109 warning in:\n${messages.warnings.join('\n')}`);
-    assert.match(warning, /src\/app\/greeting\.html:41:7: NG8109: count is a function and should be invoked/);
-    assert.deepEqual(messages.errors, []);
+test('set to error, an external template diagnostic fails the module with its line and nothing else', async () => {
+  const root = await externalTemplateApp('error', {extendedDiagnostics: {defaultCategory: 'error'}});
+  const {logger, messages} = recordingLogger();
+  const server = await createServer({
+    root,
+    cacheDir: path.join(root, '.vite'),
+    configFile: false,
+    customLogger: logger,
+    plugins: [ngp({toolchain, typeCheck: false})],
+    server: {middlewareMode: true, ws: false},
   });
-
-  test('set to error, fails the module with the template line and nothing else', async () => {
-    const {error, messages} = await transformGreeting('error', {extendedDiagnostics: {defaultCategory: 'error'}});
+  try {
+    const error = await server.environments.client.transformRequest('/src/app/greeting.ts').then(
+      () => undefined,
+      (e) => e,
+    );
     assert.ok(error, 'the module should fail');
     assert.match(error.message, /src\/app\/greeting\.html:41:7: NG8109: /);
-    // Vite logs a crash in its own error handler as an error; the diagnostic itself is the throw.
+    // The diagnostic is the thrown error. Before the fix, Vite also logged a crash in its own
+    // error handler, reading the template's offset against the .ts module.
     assert.deepEqual(messages.errors, []);
-  });
+  } finally {
+    await server.close();
+    await fs.rm(root, {recursive: true, force: true});
+  }
 });
+
+/** Runs `vitest run` in `root` and resolves to its exit code and everything it printed. */
+async function vitestRun(root) {
+  const vitest = path.join(path.dirname(createRequire(path.join(repo, 'playground/package.json')).resolve('vitest/package.json')), 'vitest.mjs');
+  const run = promisify(execFile)(process.execPath, [vitest, 'run'], {cwd: root, env: {...process.env, NO_COLOR: '1'}});
+  return run.then(
+    ({stdout, stderr}) => ({code: 0, output: stdout + stderr}),
+    (e) => ({code: e.code, output: `${e.stdout}${e.stderr}`}),
+  );
+}
