@@ -145,6 +145,14 @@ export interface TestOptions {
    * suppresses stays suppressed. Builds and the dev server still report them as configured.
    */
   extendedDiagnostics?: 'warning';
+  /**
+   * Drop the template scope errors TestBed resolves at runtime: NG8001 to NG8004 (unknown
+   * element, property, reference and pipe) in non-standalone components, which get their scope
+   * from `TestBed.configureTestingModule({declarations})`, and in components declared in a spec
+   * file; and NG8008 (missing required input) in components declared in a spec file. These are
+   * real errors elsewhere, so leave it off unless specs need it.
+   */
+  runtimeScopes?: boolean;
 }
 
 /** What the compiler plugin shares with the other plugins. */
@@ -419,6 +427,7 @@ function compilerPlugin(
         enableHmr: hmr && consumer === 'client',
         fileReplacements: replacements.byFile,
         cache: cache ?? undefined,
+        runtimeScopes: testing && options.test?.runtimeScopes === true,
       });
     })();
     compilers.set(consumer, compiler);

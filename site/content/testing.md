@@ -150,6 +150,15 @@ Leave it off if no spec overrides a component that imports an NgModule: without 
 
 You may not need the switch. Under Vitest the plugin reads `tsconfig.spec.json` first, so `"extendedDiagnostics": {"defaultCategory": "warning"}` there does the same, without code. That stops working when a check is set to `error` on its own, under `checks`, since a single check wins over `defaultCategory`. The switch covers that case too. It changes only how a diagnostic is reported, not the compiled code, so it doesn't touch the cache.
 
+**`runtimeScopes`: scope errors TestBed resolves at runtime are dropped.** Compiling one file can't see two scopes that only exist when a spec runs:
+
+- A **non-standalone** component gets its scope from its NgModule, or from `TestBed.configureTestingModule({declarations: [...]})`.
+- A component **declared in a spec file**, a test host, often gets its imports or its template from `TestBed.overrideComponent`.
+
+For these, ngp reports NG8001 to NG8004 (unknown element, property, reference and pipe), and NG8008 (missing required input) for a test host whose real template comes from an override. Each one fails the spec file. With `runtimeScopes`, the plugin drops NG8001 to NG8004 in those two kinds of component, and NG8008 in spec-declared ones. A spec file is one named `*.spec.ts` or `*.test.ts`, as in Vitest's default `include`.
+
+**Leave `runtimeScopes` off unless your specs need it.** These are real errors everywhere else, and the switch can hide a real one: an unknown element at runtime is only logged (NG0304) unless you set `errorOnUnknownElements` in `configureTestingModule`, so a misspelled selector in a non-standalone component can pass a spec. A standalone component outside a spec file keeps every error, switch or not. The switch changes what's reported, not the compiled code, so it doesn't touch the cache. If only a few specs need it, migrating their hosts to standalone components is the cleaner fix.
+
 ## Domino's gaps
 
 Domino is the DOM `@angular/platform-server` renders with, and it implements what rendering needs, not what a browser has. Three things the playground's specs ran into, with what to write instead:
