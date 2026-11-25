@@ -56,3 +56,15 @@ test('extendedDiagnostics: an extended diagnostic set to error warns in a spec i
   assert.match(withIt.output, /1 passed/);
   assert.match(withIt.output, /warning.*NG8109: count is a function and should be invoked/i);
 });
+
+test('extendedDiagnostics: covers a check ngp runs outside its factories, NG8011', async () => {
+  const asError = {extendedDiagnostics: {defaultCategory: 'error'}};
+  const without = await runSpec('projection-off', 'src/projection.spec.ts', {}, asError);
+  assert.equal(without.ok, false, 'without the switch NG8011 fails the spec file');
+  assert.match(without.output, /NG8011: Node matches the "\[header\]" slot of the "Card" component/);
+
+  const withIt = await runSpec('projection-on', 'src/projection.spec.ts', {extendedDiagnostics: 'warning'}, asError);
+  assert.equal(withIt.ok, true, withIt.output);
+  assert.match(withIt.output, /1 passed/);
+  assert.match(withIt.output, /warning.*NG8011: Node matches the "\[header\]" slot/i);
+});

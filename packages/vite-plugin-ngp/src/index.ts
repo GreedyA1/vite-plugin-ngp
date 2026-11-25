@@ -140,7 +140,7 @@ export interface TestOptions {
    */
   jitCompat?: boolean;
   /**
-   * Report Angular's extended diagnostics (NG81xx, and NG8021) as warnings in specs, whatever
+   * Report Angular's extended diagnostics (NG81xx, NG8011 and NG8021) as warnings in specs, whatever
    * category `angularCompilerOptions.extendedDiagnostics` gives them. A check the tsconfig
    * suppresses stays suppressed. Builds and the dev server still report them as configured.
    */
