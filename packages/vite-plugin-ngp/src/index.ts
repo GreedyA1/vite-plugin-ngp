@@ -607,8 +607,17 @@ function compilerPlugin(
         define: {ngServerMode: 'true', ngHmrMode: 'false'},
         resolve: {noExternal},
         // In the dev server, pre-bundle those libraries once, linked, into the cache directory,
-        // instead of linking and transforming them again on every start.
-        ...(serve && !testing && ssrEntry && name === 'ssr' ? {optimizeDeps: serverOptimizeDeps(noExternal)} : {}),
+        // instead of linking and transforming them again on every start. A server environment the
+        // plugin doesn't own, like a Cloudflare Worker's, may still pre-bundle them with its own
+        // optimizer, so it gets the linker there too.
+        ...(serve && !testing
+          ? {
+              optimizeDeps:
+                ssrEntry && name === 'ssr'
+                  ? serverOptimizeDeps(noExternal)
+                  : {rolldownOptions: {plugins: [linkerRolldownPlugin()]}},
+            }
+          : {}),
       };
     },
 
@@ -983,7 +992,8 @@ function fileReplacementsPlugin(fileReplacements: NonNullable<NgpPluginOptions['
 }
 
 const LINKER_FILTER = {
-  id: {include: /\.[cm]?js$/, exclude: /[\\/]node_modules[\\/]\.vite[\\/]/},
+  // The dev server asks for dependencies it serves unbundled with a query, like `?v=6288c9a3`.
+  id: {include: /\.[cm]?js(?:[?#]|$)/, exclude: /[\\/]node_modules[\\/]\.vite[\\/]/},
   code: LINKER_MARKER,
 };
 
@@ -994,6 +1004,8 @@ function linkerRolldownPlugin(): RolldownPlugin {
 
 /** Runs Angular's linker on library code, both where Vite pre-bundles it and where it doesn't. */
 function linkerPlugin(api: CompilerApi): Plugin {
+  /** Where Vite writes its pre-bundles: `<cacheDir>/deps`, `deps_ssr`, and so on, one per environment. */
+  let preBundles: string | undefined;
   return {
     name: 'vite-plugin-ngp:linker',
     config() {
@@ -1002,10 +1014,19 @@ function linkerPlugin(api: CompilerApi): Plugin {
       // `configEnvironment`.
       return {optimizeDeps: {rolldownOptions: {plugins: [linkerRolldownPlugin()]}}};
     },
+    configResolved(config) {
+      preBundles = `${config.cacheDir}/deps`;
+    },
     // Production builds, and dependencies Vite serves without pre-bundling.
     transform: {
       filter: LINKER_FILTER,
       handler(code, id) {
+        // A pre-bundle was linked when it was built. The filter leaves out the default `cacheDir`;
+        // this covers any other. @angular/core's pre-bundle carries the marker, as the code that
+        // defines `ɵɵngDeclare*`, so it would be parsed whole on every start to link nothing.
+        if (preBundles && id.startsWith(preBundles)) {
+          return null;
+        }
         const cache = api.cache();
         // Linking is a function of the file and the installed Angular, which the cache's scope covers.
         return (cache ? cache.reuse(['linker', cleanId(id), code], () => link(code, id)) : link(code, id)) as never;
