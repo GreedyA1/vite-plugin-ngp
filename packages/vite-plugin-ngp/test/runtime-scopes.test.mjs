@@ -1,6 +1,7 @@
 // Which diagnostics `test.runtimeScopes` drops, on hand-written analyzer metadata. The Vitest runs
-// in vitest-options.test.mjs cover inline templates end to end; this covers external templates
-// and the cases that must stay. Run `pnpm build` first.
+// in vitest-options.test.mjs cover an inline and an external template end to end; this covers the
+// cases that must stay, and two components with external templates in one file. Run `pnpm build`
+// first.
 
 import assert from 'node:assert/strict';
 import {test} from 'node:test';
