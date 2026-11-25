@@ -89,19 +89,21 @@ export function stableJson(value: unknown): string {
 }
 
 /**
- * What identifies an ngp build: the Angular commit its `BUILD.json` names, for the build inside
- * the package, else a hash of `preprocessor/api.js`, for a `toolchain/out` made with `pnpm
- * toolchain`. The native engine isn't hashed: its analysis is in the key already, as metadata.
+ * What identifies an ngp build: a hash of every `.js` file under `preprocessor/`, the code that
+ * generates the output. Not the Angular commit in `BUILD.json`: a patched or locally rebuilt
+ * preprocessor keeps that commit and generates other code. About 50 files and 0.6 MB, hashed once
+ * per compiler. The native engine isn't hashed: its analysis is in the key already, as metadata.
  */
 export async function toolchainId(toolchainDir: string): Promise<string> {
-  const build = (await fs
-    .readFile(path.join(toolchainDir, 'BUILD.json'), 'utf8')
-    .then(JSON.parse, () => null)) as {angularCommit?: string} | null;
-  if (build?.angularCommit) {
-    return `angular@${build.angularCommit}`;
+  const dir = path.join(toolchainDir, 'preprocessor');
+  const files = (await fs.readdir(dir, {recursive: true})).filter((name) => name.endsWith('.js')).sort();
+  const hash = createHash('sha256');
+  for (const name of files) {
+    // Names hashed with `/` as the separator. The order isn't portable yet: `files` is sorted
+    // with the platform's own separator, so Windows can order a build differently (#50).
+    hash.update(name.split(path.sep).join('/')).update('\0').update(await fs.readFile(path.join(dir, name))).update('\0');
   }
-  const api = await fs.readFile(path.join(toolchainDir, 'preprocessor/api.js'));
-  return `api:${createHash('sha256').update(api).digest('hex')}`;
+  return `preprocessor:${hash.digest('hex')}`;
 }
 
 /**

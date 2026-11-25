@@ -8,7 +8,7 @@ import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import {test} from 'node:test';
 import {OutputCache, stableJson} from '../dist/output-cache.js';
-import {build, copyFixture, readOutput} from './fixture.mjs';
+import {build, copyFixture, readOutput, toolchain} from './fixture.mjs';
 
 /** A statement Rolldown keeps, so a cached module that carries it shows in the bundle. */
 const MARKER = '\nglobalThis.__ngpCacheMarker = "from-cache";\n';
@@ -85,6 +85,28 @@ test('a cache copied to another path is not read: compiled modules name their st
   await build(second, {});
   const bundle = (await readOutput(path.join(second, 'dist'))).map((f) => f.content).join('\n');
   assert.doesNotMatch(bundle, /cache-moved-from/);
+});
+
+test('an edited preprocessor misses, even with the same Angular commit in BUILD.json', async () => {
+  const root = await copyFixture('ng-build-app', 'cache-preprocessor');
+  const cacheDir = path.join(root, '.vite/vite-plugin-ngp/cache');
+  // A copy of the ngp build, with the BUILD.json the package ships, so the edit below is like a
+  // patch applied to the preprocessor inside node_modules.
+  const ngpBuild = path.join(root, 'ngp');
+  await fs.cp(toolchain, ngpBuild, {recursive: true});
+  await fs.writeFile(path.join(ngpBuild, 'BUILD.json'), JSON.stringify({angularCommit: 'same-commit'}));
+  const bundle = async () => (await readOutput(path.join(root, 'dist'))).map((f) => f.content).join('\n');
+
+  await build(root, {toolchain: ngpBuild});
+  await markEntry(cacheDir, 'app-root');
+  await build(root, {toolchain: ngpBuild});
+  assert.match(await bundle(), /__ngpCacheMarker/, 'an unchanged preprocessor reads the cache');
+
+  // A file deep in the preprocessor, not its entry point.
+  const processor = path.join(ngpBuild, 'preprocessor/src/processor.js');
+  await fs.appendFile(processor, '\n// patched\n');
+  await build(root, {toolchain: ngpBuild});
+  assert.doesNotMatch(await bundle(), /__ngpCacheMarker/, 'App was compiled again');
 });
 
 test('cache: false writes nothing', async () => {
