@@ -19,6 +19,7 @@ import {budgetsPlugin, type Budget} from './budgets.js';
 import {NgpCompiler, type ComponentStyle, type HmrUpdate, type TransformResult} from './compiler.js';
 import {writeEntryTsconfig} from './entry-tsconfig.js';
 import {i18nPlugin, type I18nOptions} from './i18n.js';
+import {EXTENDED_DIAGNOSTIC_CODES} from './extended-diagnostics.js';
 import {link, LINKER_MARKER} from './linker.js';
 import {isSideEffectFree, optimize, OPTIMIZER_CANDIDATE} from './optimizer.js';
 import {resolveToolchain, type Engine, type NgpDiagnostic} from './ngp-api.js';
@@ -138,6 +139,12 @@ export interface TestOptions {
    * component sees nothing from the NgModules it imports.
    */
   jitCompat?: boolean;
+  /**
+   * Report Angular's extended diagnostics (NG81xx, NG8011 and NG8021) as warnings in specs, whatever
+   * category `angularCompilerOptions.extendedDiagnostics` gives them. A check the tsconfig
+   * suppresses stays suppressed. Builds and the dev server still report them as configured.
+   */
+  extendedDiagnostics?: 'warning';
 }
 
 /** What the compiler plugin shares with the other plugins. */
@@ -261,6 +268,11 @@ function compilerPlugin(
   const testing = isVitest();
   /** `test.jitCompat`, which only applies under Vitest. */
   const jitCompat = testing && options.test?.jitCompat === true;
+  if (options.test?.extendedDiagnostics !== undefined && options.test.extendedDiagnostics !== 'warning') {
+    throw new Error(`[vite-plugin-ngp] test.extendedDiagnostics must be 'warning', not ${JSON.stringify(options.test.extendedDiagnostics)}`);
+  }
+  /** `test.extendedDiagnostics`: an extended diagnostic that would fail a spec warns instead. */
+  const extendedAsWarnings = testing && options.test?.extendedDiagnostics === 'warning';
   const ssrOptions = testing ? null : options.ssr === true ? {} : options.ssr || null;
   const ssrEntry = ssrOptions ? (ssrOptions.entry ?? 'src/main.server.ts') : null;
   /**
@@ -862,7 +874,7 @@ function compilerPlugin(
         for (const d of result.diagnostics) {
           const log = await diagnosticLog(d, file, config.root, read);
           // ts.DiagnosticCategory.Error
-          if (d.category === 1) {
+          if (d.category === 1 && !(extendedAsWarnings && EXTENDED_DIAGNOSTIC_CODES.has(d.code))) {
             this.error(log);
           } else {
             this.warn(log);

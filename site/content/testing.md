@@ -146,6 +146,10 @@ ngp({test: {jitCompat: true}});
 
 Leave it off if no spec overrides a component that imports an NgModule: without it, specs run the code your app ships.
 
+**`extendedDiagnostics: 'warning'`: extended checks warn instead of failing a spec.** Specs go through the same compiler as your app, so Angular's [extended diagnostics](type-checking#angulars-extended-diagnostics) run on them, which JIT never did. If your tsconfig sets `extendedDiagnostics.defaultCategory: "error"` for the build, an unused standalone import (NG8113) in a component fails every spec file that imports it, and the spec file runs no tests. With the switch, each one is a warning in the Vitest output, and the build and the dev server still report it as your tsconfig says. A check your tsconfig suppresses stays suppressed. The switch covers every check `extendedDiagnostics.checks` accepts, including the two outside the NG81xx range: `controlFlowPreventingContentProjection` (NG8011) and `deferTriggerMisconfiguration` (NG8021).
+
+You may not need the switch. Under Vitest the plugin reads `tsconfig.spec.json` first, so `"extendedDiagnostics": {"defaultCategory": "warning"}` there does the same, without code. That stops working when a check is set to `error` on its own, under `checks`, since a single check wins over `defaultCategory`. The switch covers that case too. It changes only how a diagnostic is reported, not the compiled code, so it doesn't touch the cache.
+
 ## Domino's gaps
 
 Domino is the DOM `@angular/platform-server` renders with, and it implements what rendering needs, not what a browser has. Three things the playground's specs ran into, with what to write instead:

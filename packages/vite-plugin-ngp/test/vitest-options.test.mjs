@@ -5,6 +5,7 @@
 import assert from 'node:assert/strict';
 import {execFile} from 'node:child_process';
 import {createRequire} from 'node:module';
+import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import {test} from 'node:test';
 import {promisify} from 'node:util';
@@ -12,9 +13,16 @@ import {copyFixture, toolchain} from './fixture.mjs';
 
 const vitestBin = path.join(path.dirname(createRequire(import.meta.url).resolve('vitest/package.json')), 'vitest.mjs');
 
-/** Runs `vitest run <spec>` on a fresh copy of the fixture, with `testOptions` as `test`. */
-async function runSpec(label, spec, testOptions) {
+/**
+ * Runs `vitest run <spec>` on a fresh copy of the fixture, with `testOptions` as `test` and
+ * `angularCompilerOptions` added to its tsconfig.
+ */
+async function runSpec(label, spec, testOptions, angularCompilerOptions = {}) {
   const root = await copyFixture('vitest-specs', label);
+  const tsconfig = path.join(root, 'tsconfig.json');
+  const config = JSON.parse(await fs.readFile(tsconfig, 'utf8'));
+  config.angularCompilerOptions = {...config.angularCompilerOptions, ...angularCompilerOptions};
+  await fs.writeFile(tsconfig, JSON.stringify(config));
   try {
     const {stdout, stderr} = await promisify(execFile)(process.execPath, [vitestBin, 'run', spec], {
       cwd: root,
@@ -34,4 +42,29 @@ test('jitCompat: an overridden component keeps the scopes of the NgModules it im
   const withIt = await runSpec('jit-on', 'src/override.spec.ts', {jitCompat: true});
   assert.equal(withIt.ok, true, withIt.output);
   assert.match(withIt.output, /2 passed/);
+});
+
+test('extendedDiagnostics: an extended diagnostic set to error warns in a spec instead of failing it', async () => {
+  const asError = {extendedDiagnostics: {defaultCategory: 'error'}};
+  const without = await runSpec('extended-off', 'src/counter.spec.ts', {}, asError);
+  assert.equal(without.ok, false, 'without the switch NG8109 fails the spec file');
+  assert.match(without.output, /NG8109: count is a function and should be invoked/);
+  assert.match(without.output, /no tests|1 failed/i);
+
+  const withIt = await runSpec('extended-on', 'src/counter.spec.ts', {extendedDiagnostics: 'warning'}, asError);
+  assert.equal(withIt.ok, true, withIt.output);
+  assert.match(withIt.output, /1 passed/);
+  assert.match(withIt.output, /warning.*NG8109: count is a function and should be invoked/i);
+});
+
+test('extendedDiagnostics: covers a check ngp runs outside its factories, NG8011', async () => {
+  const asError = {extendedDiagnostics: {defaultCategory: 'error'}};
+  const without = await runSpec('projection-off', 'src/projection.spec.ts', {}, asError);
+  assert.equal(without.ok, false, 'without the switch NG8011 fails the spec file');
+  assert.match(without.output, /NG8011: Node matches the "\[header\]" slot of the "Card" component/);
+
+  const withIt = await runSpec('projection-on', 'src/projection.spec.ts', {extendedDiagnostics: 'warning'}, asError);
+  assert.equal(withIt.ok, true, withIt.output);
+  assert.match(withIt.output, /1 passed/);
+  assert.match(withIt.output, /warning.*NG8011: Node matches the "\[header\]" slot/i);
 });
