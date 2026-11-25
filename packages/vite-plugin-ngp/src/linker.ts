@@ -33,8 +33,11 @@ const host = new OxcAstHost();
 const fileSystem = new NodeJSFileSystem();
 const logger = new ConsoleLogger(LogLevel.warn);
 
-/** Links one library module. Returns null when it has nothing to link. */
-export function link(code: string, id: string): {code: string; map: unknown} | null {
+/**
+ * Links one library module. Returns null when it has nothing to link. `jit` keeps what the JIT
+ * compiler needs, like each NgModule's scope, as TestBed's overrides do (`test.jitCompat`).
+ */
+export function link(code: string, id: string, jit = false): {code: string; map: unknown} | null {
   const file = id.replace(/[?#].*$/, '');
   if (!code.includes(LINKER_MARKER) || NEVER_LINKED.test(file)) {
     return null;
@@ -47,7 +50,7 @@ export function link(code: string, id: string): {code: string; map: unknown} | n
   // Source maps are off: the linker's own mapping is for the Babel printer. The map comes from
   // magic-string below, and maps every byte outside the replaced calls.
   const environment = LinkerEnvironment.create<string, Expression, string>(fileSystem, logger, host, factory, {
-    linkerJitMode: false,
+    linkerJitMode: jit,
     sourceMapping: false,
   });
   const linker = new FileLinker<null, string, Expression, string>(environment, file as AbsoluteFsPath, code);

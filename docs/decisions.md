@@ -845,3 +845,15 @@ A disk cache of the linker's output, keyed by file content and Angular version, 
 **Cost.** One indirection to know about: a new `import 'typescript'` in the plugin would bring the bug back, and only the test that checks the plugin's TypeScript is compiler-cli's, plus the template-error check in create-ngp's Vite+ test, would catch it. pnpm 11 and later still print an unmet `typescript` peer warning for the plugin, which is now harmless.
 
 **Revisit when** TypeScript 7 publishes its CLI under a name of its own, so the alias can go.
+
+## 71. Put test-only behaviour behind a `test` option, one switch per risk
+
+*25 November 2026*
+
+**Decision.** Behaviour that only specs written for JIT TestBed need goes behind a `test` option, `test: {jitCompat: true}` and later switches beside it, never behind the `VITEST` variable alone. Each switch is off by default, applies under Vitest only and is ignored in the dev server and in builds, so it can sit in a Vite config both share. Each switch that changes compiled or linked output goes into the cache keys. The switches split by risk rather than sit behind one flag: `jitCompat` covers what only restores what JIT TestBed had (NgModule scopes for overrides, and synchronous class metadata for `@defer` dependencies); dropping the scope errors that TestBed resolves at runtime gets its own switch, because those are real errors in a standalone project, and an unknown element at runtime is only logged; extended diagnostics as warnings gets its own too, because a strict project may want them to fail specs ([issue #27](https://github.com/push-based/vite-plugin-ngp/issues/27)).
+
+**Why.** A monorepo moving 1,035 projects from Karma or Jest needed four patches on ngp and the plugin to run its specs, each gated on `process.env.VITEST`. That's the wrong switch for a library: every Vitest user would get JIT-linked libraries and silenced scope errors whether they wanted them or not. One switch for all four would have been simpler to set, but it would force a project that wants overrides to also hide unknown-element errors.
+
+**Cost.** One more option, with switches to document one by one. A spec run with `jitCompat` links libraries differently from the build, so a bug that only shows in AOT-linked code can pass a spec. Turning a switch on costs one cache rebuild for what it changes.
+
+**Revisit when** ngp grows a test mode of its own that covers these, or when Angular's own Vitest runner settles on a set of JIT-compatibility switches to match.

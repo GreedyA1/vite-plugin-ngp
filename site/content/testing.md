@@ -103,7 +103,7 @@ const harness = await RouterTestingHarness.create();
 await harness.navigateByUrl('/router/signals');
 ```
 
-TestBed overrides work too. `TestBed.overrideComponent(Rating, {set: {template: '...'}})` recompiles that one component with the JIT compiler, which `@angular/core/testing` always loads. ngp emits the class metadata that needs, in `ɵsetClassMetadata` calls, and they run because `ngDevMode` stays on in tests.
+TestBed overrides work too. `TestBed.overrideComponent(Rating, {set: {template: '...'}})` recompiles that one component with the JIT compiler, which `@angular/core/testing` always loads. ngp emits the class metadata that needs, in `ɵsetClassMetadata` calls, and they run because `ngDevMode` stays on in tests. An override of a component that imports an NgModule, such as `CommonModule`, needs [`test.jitCompat`](testing#specs-written-for-jit) as well.
 
 The playground's specs are in its `src/` folder, next to the files they test: a component spec, a service spec and a routed spec, 11 tests in all. Its three setup files are in `src/testing/`, one per project.
 
@@ -130,9 +130,21 @@ That's 3 of the playground's 29 modules. All three specs together load 10. The r
 
 **Libraries are cached, your code isn't.** Vitest 5 caches transformed modules on disk, keyed by each file's own content. That's wrong for a component: its compiled code also depends on its template, its styles and the components it imports, so a template edit would come back stale. The plugin keeps your app's `.ts` files out of that cache. Linked libraries stay in it, and linking is the slow part. On an M2 Max, measured on 6 November 2026, the playground's 11 tests take 1.5 s with an empty cache, and 0.58–0.61 s after that. Since 9 November 2026 your own modules have a cache of their own, the plugin's, whose key covers the template, the stylesheets and the used components' public shape ([Reusing output between builds](how-it-works#reusing-output-between-builds)). A run compiles only what changed since the last one; the analyzer still looks at every module a run imports.
 
-**No HMR, no SSR.** Compiled components carry no HMR code, and the `ssr` option is ignored. `ngDevMode` stays on, as in the dev server, and `ngJitMode` is `false`. `ngServerMode` follows Vitest's environment: `true` under `node`, where Vitest runs specs in a server environment, undefined under jsdom, which Vitest treats as a client, and `false` in browser mode. So on the server platform Angular takes the same code paths it takes in `main.server.ts`, and in a browser the ones it takes in `main.ts`.
+**No HMR, no SSR.** Compiled components carry no HMR code, and the `ssr` option is ignored. `ngDevMode` stays on, as in the dev server, and `ngJitMode` is `false`, unless [`test.jitCompat`](testing#specs-written-for-jit) is on. `ngServerMode` follows Vitest's environment: `true` under `node`, where Vitest runs specs in a server environment, undefined under jsdom, which Vitest treats as a client, and `false` in browser mode. So on the server platform Angular takes the same code paths it takes in `main.server.ts`, and in a browser the ones it takes in `main.ts`.
 
 **Watch mode follows edits Angular cares about.** `vitest` without `run` reruns the specs that depend on what you saved. Edit a template, and the plugin tells Vitest its component changed, so that component's specs rerun with the new template. Edit a child component, and the parents that use it are compiled again too, so a renamed input fails the parent's spec with `NG8002: Can't bind to 'eyebrow'` instead of passing on stale code.
+
+## Specs written for JIT
+
+Specs written for Karma or Jest ran on the JIT compiler, which resolves a component's scope at runtime. Under the plugin they compile ahead of time, like the app, and a few things JIT allowed stop working. The `test` option turns back on what a suite like that needs, one switch at a time. Each switch applies under Vitest only, and is off unless you set it:
+
+```ts title="vitest.config.ts"
+ngp({test: {jitCompat: true}});
+```
+
+**`jitCompat`: TestBed overrides see NgModules.** `TestBed.overrideComponent`, `overrideModule` and `overrideTemplate` recompile a class with JIT, and JIT reads the scope of every NgModule the class imports. Ahead-of-time code drops those scopes: the linker strips them from libraries, and `ngJitMode: false` strips them from your own NgModules. So an overridden template that uses `*ngIf` from `CommonModule` renders nothing, with `NG0303: Can't bind to 'ngIf' since it isn't a known property of 'p'` on the console. With `jitCompat`, libraries are linked in JIT mode and `ngJitMode` is `true`, and the override works. It costs a little more linked code per NgModule, in specs only. It goes into the plugin's cache key, and into Vitest's for linked libraries, so turning it on or off never serves a module linked the other way. In browser mode it reaches Vite's dependency pre-bundling too.
+
+Leave it off if no spec overrides a component that imports an NgModule: without it, specs run the code your app ships.
 
 ## Domino's gaps
 

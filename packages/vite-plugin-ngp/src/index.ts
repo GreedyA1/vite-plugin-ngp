@@ -122,6 +122,22 @@ export interface NgpPluginOptions {
    * unchanged. The dev server never uses it. Defaults to true.
    */
   cache?: boolean;
+  /**
+   * Test-only behaviour, for specs written for TestBed under JIT. Applies under Vitest only, and
+   * is ignored in the dev server and in builds, so it can sit in a Vite config both share. Off by
+   * default: without it, specs compile exactly like the app.
+   */
+  test?: TestOptions;
+}
+
+export interface TestOptions {
+  /**
+   * Keep what `TestBed.overrideComponent`, `overrideModule` and `overrideTemplate` need to
+   * recompile a class with JIT: libraries are linked with `linkerJitMode`, and `ngJitMode` is
+   * `true`, so NgModules keep their scopes (`ɵɵsetNgModuleScope`). Without it, an overridden
+   * component sees nothing from the NgModules it imports.
+   */
+  jitCompat?: boolean;
 }
 
 /** What the compiler plugin shares with the other plugins. */
@@ -207,6 +223,7 @@ const PENDING_EDIT_MS = 1000;
 export function ngp(options: NgpPluginOptions = {}): Plugin[] {
   const replacements: Replacements = {byFile: new Map(), byReplacement: new Map()};
   const compiler = compilerPlugin(options, replacements);
+  const jitCompat = isVitest() && options.test?.jitCompat === true;
   // With i18n, the plugin loads `$localize` itself in dev, and builds translate it away, so a
   // `@angular/localize` polyfill is dropped, as the CLI drops it when it inlines translations.
   const polyfills = (options.polyfills ?? []).filter((p) => !(options.i18n && p.startsWith('@angular/localize')));
@@ -216,7 +233,7 @@ export function ngp(options: NgpPluginOptions = {}): Plugin[] {
     // Measures component stylesheets before the styles plugin scopes them.
     ...(options.budgets?.length ? [budgetsPlugin(options.budgets, compiler.api)] : []),
     stylesPlugin(compiler.api),
-    linkerPlugin(compiler.api),
+    linkerPlugin(compiler.api, jitCompat),
     optimizerPlugin(compiler.api),
     ...(polyfills.length > 0 ? [polyfillsPlugin(polyfills, () => compiler.api.entries())] : []),
     ...(usesZone(polyfills) ? [zoneAsyncPlugin()] : []),
@@ -242,6 +259,8 @@ function compilerPlugin(
   let root = process.cwd();
   /** Under Vitest: specs are compiled like any other module, with no HMR and no SSR. */
   const testing = isVitest();
+  /** `test.jitCompat`, which only applies under Vitest. */
+  const jitCompat = testing && options.test?.jitCompat === true;
   const ssrOptions = testing ? null : options.ssr === true ? {} : options.ssr || null;
   const ssrEntry = ssrOptions ? (ssrOptions.entry ?? 'src/main.server.ts') : null;
   /**
@@ -577,7 +596,8 @@ function compilerPlugin(
           /[\\/]node_modules[\\/]@angular[\\/]/,
           ...findAngularLibraries(root, {devDependencies: true}).map(packagePathPattern),
         ];
-        return {define: {ngJitMode: 'false', ngHmrMode: 'false'}, test: {server: {deps: {inline}}}} as UserConfig;
+        // `test.jitCompat` keeps NgModule scopes, which TestBed's JIT overrides read.
+        return {define: {ngJitMode: String(jitCompat), ngHmrMode: 'false'}, test: {server: {deps: {inline}}}} as UserConfig;
       }
       return {
         define: {
@@ -653,8 +673,10 @@ function compilerPlugin(
       // Vitest caches transformed modules on disk, keyed by the module's own content. A compiled
       // component also depends on its template, its styles, and the components it imports, so
       // the app's modules stay out of that cache. The plugin's own cache, whose key covers all of
-      // that, serves them instead (`OutputCache`). Linked libraries stay in Vitest's.
-      context.defineCacheKeyGenerator(({id}) => (isAppModule(id) ? false : undefined));
+      // that, serves them instead (`OutputCache`). Linked libraries stay in Vitest's. Its key
+      // covers the config file but not `define` or how a library was linked, so `test.jitCompat`
+      // adds to it: a run with it never reads a module linked or defined without it.
+      context.defineCacheKeyGenerator(({id}) => (isAppModule(id) ? false : jitCompat ? 'vite-plugin-ngp:jit-compat' : undefined));
     },
 
     configureServer(server) {
@@ -998,12 +1020,15 @@ const LINKER_FILTER = {
 };
 
 /** The linker as a Rolldown plugin, for Vite's dependency pre-bundling. */
-function linkerRolldownPlugin(): RolldownPlugin {
-  return {name: 'vite-plugin-ngp:linker', transform: {filter: LINKER_FILTER, handler: (code: string, id: string) => link(code, id) as never}};
+function linkerRolldownPlugin(jit = false): RolldownPlugin {
+  return {name: 'vite-plugin-ngp:linker', transform: {filter: LINKER_FILTER, handler: (code: string, id: string) => link(code, id, jit) as never}};
 }
 
-/** Runs Angular's linker on library code, both where Vite pre-bundles it and where it doesn't. */
-function linkerPlugin(api: CompilerApi): Plugin {
+/**
+ * Runs Angular's linker on library code, both where Vite pre-bundles it and where it doesn't.
+ * `jit` keeps what JIT needs (`test.jitCompat`).
+ */
+function linkerPlugin(api: CompilerApi, jit: boolean): Plugin {
   /** Where Vite writes its pre-bundles: `<cacheDir>/deps`, `deps_ssr`, and so on, one per environment. */
   let preBundles: string | undefined;
   return {
@@ -1011,8 +1036,14 @@ function linkerPlugin(api: CompilerApi): Plugin {
     config() {
       // In dev, Vite pre-bundles the client's dependencies with Rolldown, outside the plugin
       // pipeline. This reaches the client environment only; server environments get theirs from
-      // `configEnvironment`.
-      return {optimizeDeps: {rolldownOptions: {plugins: [linkerRolldownPlugin()]}}};
+      // `configEnvironment`. Vitest's browser mode pre-bundles the same way. Its hash leaves out
+      // Rolldown plugins but not `transform`, so the `define` that matches JIT linking also
+      // keeps a pre-bundle linked one way from being reused for the other.
+      return {
+        optimizeDeps: {
+          rolldownOptions: {plugins: [linkerRolldownPlugin(jit)], ...(jit ? {transform: {define: {ngJitMode: 'true'}}} : {})},
+        },
+      };
     },
     configResolved(config) {
       preBundles = `${config.cacheDir}/deps`;
@@ -1028,8 +1059,10 @@ function linkerPlugin(api: CompilerApi): Plugin {
           return null;
         }
         const cache = api.cache();
-        // Linking is a function of the file and the installed Angular, which the cache's scope covers.
-        return (cache ? cache.reuse(['linker', cleanId(id), code], () => link(code, id)) : link(code, id)) as never;
+        // Linking is a function of the file, the installed Angular, which the cache's scope covers,
+        // and JIT mode. Without JIT the key is the one it always was, so existing entries still hit.
+        const parts = jit ? ['linker', cleanId(id), code, 'jit'] : ['linker', cleanId(id), code];
+        return (cache ? cache.reuse(parts, () => link(code, id, jit)) : link(code, id, jit)) as never;
       },
     },
   };
