@@ -13,6 +13,10 @@ What changed in vite-plugin-ngp, newest first, written for people using it. Ever
 
 - `npm create @push-based/ngp`, or `vp create @push-based/ngp` with Vite+, scaffolds an Angular app on the plugin: the app [Getting started](getting-started) describes, with routing, a Vitest spec on the server platform, and an `app-ssr` template that renders on the server and hydrates. The scaffolder is a new package, `@push-based/create-ngp`, released with the plugin at the same version, and it pins the plugin and Angular to the versions released together. [Using Vite+](vite-plus#create-a-new-app)
 
+### Testing
+
+- A new `test` option holds behaviour for specs written for TestBed under JIT. Its first switch, `jitCompat`, makes `TestBed.overrideComponent` and the other overrides work for components that import an NgModule, from a library or your app: libraries are linked in JIT mode and `ngJitMode` is `true`, under Vitest only. Before, the overridden template saw nothing from the NgModule, and `*ngIf` from `CommonModule` failed with NG0303. Off by default, so existing setups compile as before. [Testing](testing#specs-written-for-jit), [Configuration](configuration)
+
 ### Fixes
 
 - The output cache now misses when ngp's preprocessor changes. Its key named the Angular commit the package's ngp was built from, so a patched preprocessor in `node_modules`, or a local build of ngp, kept getting output it no longer generates. The key now hashes every `.js` file of the preprocessor, about 50 files. After updating, the first build or test run compiles everything once. [How it works](how-it-works#reusing-output-between-builds)
