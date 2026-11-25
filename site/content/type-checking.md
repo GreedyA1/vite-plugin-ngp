@@ -47,6 +47,8 @@ These come out of the compile, not the `tsgo` pass, so you get them with [`typeC
   File: /Users/you/app/src/app/counter.ts
 ```
 
+When the check fires in an external template, the message starts with the template's path, line and column, relative to the project root: `src/app/counter.html:41:7: NG8109: count is a function…`. Vite places a plugin's warning by an offset into the module it's compiling, the `.ts` file, and that offset can't point into another file, so the plugin writes the location into the message instead. It reads the same under the dev server, `vite build` and Vitest.
+
 They're warnings, so they don't fail `vite build`. Your tsconfig's `angularCompilerOptions.extendedDiagnostics` decides that, the same way it does under `ng build`: `defaultCategory` makes the lot errors or suppresses them, and `checks` sets one at a time.
 
 ```json title="tsconfig.json"

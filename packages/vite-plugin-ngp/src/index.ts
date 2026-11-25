@@ -21,7 +21,7 @@ import {writeEntryTsconfig} from './entry-tsconfig.js';
 import {i18nPlugin, type I18nOptions} from './i18n.js';
 import {link, LINKER_MARKER} from './linker.js';
 import {isSideEffectFree, optimize, OPTIMIZER_CANDIDATE} from './optimizer.js';
-import {resolveToolchain, type Engine} from './ngp-api.js';
+import {resolveToolchain, type Engine, type NgpDiagnostic} from './ngp-api.js';
 import {cacheScope, OutputCache} from './output-cache.js';
 import {polyfillsPlugin, usesZone, zoneAsyncPlugin} from './polyfills.js';
 import {
@@ -35,6 +35,7 @@ import {
   TypeChecker,
   type TypeCheckResult,
 } from './type-check.js';
+import {lineAndColumn} from './type-check-diagnostics.js';
 import {rewriteToUrls, stylesPlugin, type StylesPluginContext} from './styles.js';
 
 export type {Budget} from './budgets.js';
@@ -826,10 +827,9 @@ function compilerPlugin(
           failed.delete(file);
           return null;
         }
+        const read = readEachOnce();
         for (const d of result.diagnostics) {
-          // Extended diagnostics (NG81xx) already name their code in the message; the rest don't.
-          const prefixed = d.messageText.startsWith(`NG${d.code}:`) ? d.messageText : `NG${d.code}: ${d.messageText}`;
-          const log = {message: prefixed, id: d.filePath ?? file, pos: d.span?.start};
+          const log = await diagnosticLog(d, file, config.root, read);
           // ts.DiagnosticCategory.Error
           if (d.category === 1) {
             this.error(log);
@@ -1156,6 +1156,52 @@ function isAppModule(id: string): boolean {
 /** Vitest sets VITEST in the process that runs Vite and in every worker. */
 function isVitest(): boolean {
   return !!process.env['VITEST'];
+}
+
+/**
+ * A compile diagnostic as a Vite log. `pos` is an offset into the module being transformed, so only
+ * a diagnostic in that module may carry one. Vite's dev server, which Vitest runs, reads `pos`
+ * against the module's code: for a diagnostic in an external template it pointed at the wrong
+ * line, and one past the module's end threw, so even a warning failed the module. A diagnostic in
+ * another file names its own location in the message instead, which `vite build` prints as well
+ * (Rolldown replaces the log's `id` with the module's). Line and column come from `read`, the same
+ * way the type-check maps its errors into a template.
+ */
+async function diagnosticLog(
+  d: NgpDiagnostic,
+  file: string,
+  root: string,
+  read: (file: string) => Promise<string | undefined>,
+): Promise<{message: string; id: string; pos?: number}> {
+  // Extended diagnostics (NG81xx) already name their code in the message; the rest don't.
+  const message = d.messageText.startsWith(`NG${d.code}:`) ? d.messageText : `NG${d.code}: ${d.messageText}`;
+  if (!d.filePath || d.filePath === file) {
+    return {message, id: file, pos: d.span?.start};
+  }
+  let location = path.relative(root, d.filePath).split(path.sep).join('/');
+  const start = d.span?.start;
+  const text = start === undefined ? undefined : await read(d.filePath);
+  if (start !== undefined && text !== undefined && start <= text.length) {
+    const {line, column} = lineAndColumn(text, start);
+    location += `:${line}:${column}`;
+  }
+  return {message: `${location}: ${message}`, id: d.filePath};
+}
+
+/**
+ * Reads files for one module's diagnostics: each file once, however many diagnostics point into
+ * it. Resolves to undefined for a file that can't be read.
+ */
+function readEachOnce(): (file: string) => Promise<string | undefined> {
+  const texts = new Map<string, Promise<string | undefined>>();
+  return (file) => {
+    let text = texts.get(file);
+    if (!text) {
+      text = fs.promises.readFile(file, 'utf8').catch(() => undefined);
+      texts.set(file, text);
+    }
+    return text;
+  };
 }
 
 function cleanId(id: string): string {
