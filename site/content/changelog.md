@@ -7,6 +7,12 @@ description: What changed in vite-plugin-ngp, newest first, for anyone following
 
 What changed in vite-plugin-ngp, newest first, written for people using it. Every entry links to the page that documents it. Versions on npm, with the commits in each, are in the repo's [CHANGELOG.md](https://github.com/push-based/vite-plugin-ngp/blob/main/CHANGELOG.md) and its [GitHub releases](https://github.com/push-based/vite-plugin-ngp/releases).
 
+## 25 November 2026
+
+### Fixes
+
+- The output cache now misses when ngp's preprocessor changes. Its key named the Angular commit the package's ngp was built from, so a patched preprocessor in `node_modules`, or a local build of ngp, kept getting output it no longer generates. The key now hashes every `.js` file of the preprocessor, about 50 files. After updating, the first build or test run compiles everything once. [How it works](how-it-works#reusing-output-between-builds)
+
 ## 17 November 2026
 
 ### Angular
