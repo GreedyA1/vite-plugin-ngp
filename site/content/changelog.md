@@ -16,6 +16,7 @@ What changed in vite-plugin-ngp, newest first, written for people using it. Ever
 ### Testing
 
 - A new `test` option holds behaviour for specs written for TestBed under JIT. Its first switch, `jitCompat`, makes `TestBed.overrideComponent` and the other overrides work for components that import an NgModule, from a library or your app: libraries are linked in JIT mode and `ngJitMode` is `true`, under Vitest only. Before, the overridden template saw nothing from the NgModule, and `*ngIf` from `CommonModule` failed with NG0303. Off by default, so existing setups compile as before. [Testing](testing#specs-written-for-jit), [Configuration](configuration)
+- A second switch, `test.extendedDiagnostics: 'warning'`, reports Angular's extended diagnostics as warnings in specs, even when your tsconfig sets one or all of them to `error`. Before, an unused standalone import in a component failed every spec file that imported it. Builds and the dev server still report them as configured. [Testing](testing#specs-written-for-jit)
 
 ### Fixes
 
