@@ -68,3 +68,20 @@ test('extendedDiagnostics: covers a check ngp runs outside its factories, NG8011
   assert.match(withIt.output, /1 passed/);
   assert.match(withIt.output, /warning.*NG8011: Node matches the "\[header\]" slot/i);
 });
+
+test('runtimeScopes: scope errors TestBed resolves at runtime are dropped, and the specs pass', async () => {
+  const without = await runSpec('scopes-off', 'src/scopes.spec.ts', {});
+  assert.equal(without.ok, false, 'without the switch the scope errors fail the spec file');
+  assert.match(without.output, /NG8001: 'app-legacy' is not a known element|NG8008: Required input 'label'|NG8001: 'app-legacy-child'/);
+
+  const withIt = await runSpec('scopes-on', 'src/scopes.spec.ts', {runtimeScopes: true});
+  assert.equal(withIt.ok, true, withIt.output);
+  assert.match(withIt.output, /2 passed/);
+  assert.doesNotMatch(withIt.output, /NG800[1-48]/);
+});
+
+test('runtimeScopes: a standalone component outside a spec keeps its scope errors', async () => {
+  const withIt = await runSpec('scopes-standalone', 'src/typo.spec.ts', {runtimeScopes: true});
+  assert.equal(withIt.ok, false, 'a typo in a standalone component still fails');
+  assert.match(withIt.output, /NG8001: 'app-lable' is not a known element/);
+});

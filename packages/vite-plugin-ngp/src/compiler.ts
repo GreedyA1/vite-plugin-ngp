@@ -2,7 +2,7 @@ import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import {readConfiguration} from '@angular/compiler-cli';
 import {hmrCandidates} from './hmr-candidates.js';
-import {FileUpdateType, loadNgp, type Analyzer, type Engine, type HybridCompiler, type NgpDiagnostic} from './ngp-api.js';
+import {FileUpdateType, loadNgp, type Analyzer, type ClassMetadata, type Engine, type HybridCompiler, type NgpDiagnostic} from './ngp-api.js';
 import {stableJson, toolchainId, type OutputCache} from './output-cache.js';
 
 export interface CompilerOptions {
@@ -21,6 +21,11 @@ export interface CompilerOptions {
   fileReplacements?: Map<string, string>;
   /** Compiled output kept between runs. Builds and Vitest set it; the dev server doesn't. */
   cache?: OutputCache;
+  /**
+   * Drop the scope errors TestBed resolves at runtime (`test.runtimeScopes`): see
+   * `dropRuntimeScoped`. Changes what's reported, not the output.
+   */
+  runtimeScopes?: boolean;
 }
 
 /** One component's HMR update: Angular's id for it, and the update module as TypeScript. */
@@ -81,6 +86,7 @@ export class NgpCompiler {
     private readonly cache: OutputCache | null,
     /** What every cached output of this compiler depends on, besides the module. See cacheKey. */
     private readonly cacheIdentity: string,
+    private readonly runtimeScopes: boolean,
   ) {}
 
   static async create(options: CompilerOptions): Promise<NgpCompiler> {
@@ -137,6 +143,7 @@ export class NgpCompiler {
       new Set(replacements.keys()),
       options.cache ?? null,
       cacheIdentity,
+      options.runtimeScopes ?? false,
     );
     // The analyzer follows imports on disk, so it would read the replaced file. Giving it the
     // replacement's content under the replaced file's path makes every file that imports it, and
@@ -158,7 +165,7 @@ export class NgpCompiler {
     if (key) {
       const hit = await this.cache!.get<{result: TransformResult | null}>(key);
       if (hit) {
-        return hit.result && {...hit.result, cached: true};
+        return hit.result && this.reported({...hit.result, cached: true}, file, metadata);
       }
     }
     const processed = await this.hybrid.processFile(file, code, metadata ?? undefined);
@@ -172,7 +179,15 @@ export class NgpCompiler {
     if (key) {
       await this.cache!.put(key, {result});
     }
-    return result;
+    return result && this.reported(result, file, metadata);
+  }
+
+  /**
+   * `result` with the diagnostics this compiler reports. The cache keeps them all, so turning
+   * `runtimeScopes` on or off needs no new compile.
+   */
+  private reported(result: TransformResult, file: string, metadata: FileMetadata): TransformResult {
+    return this.runtimeScopes ? {...result, diagnostics: dropRuntimeScoped(result.diagnostics, file, metadata)} : result;
   }
 
   /**
@@ -494,4 +509,61 @@ export class NgpCompiler {
   close(): void {
     this.analyzer.close();
   }
+}
+
+/** NG8001 to NG8004: unknown element, property, reference target and pipe. */
+const SCOPE_ERRORS = new Set([8001, 8002, 8003, 8004]);
+/** NG8008: a required input left out. */
+const MISSING_REQUIRED_INPUTS = 8008;
+/** A spec file, by Vitest's default `include` pattern. */
+const SPEC_FILE = /\.(?:spec|test)\.[cm]?[jt]sx?$/;
+
+/**
+ * `diagnostics` without the errors TestBed resolves at runtime, which compiling one file can't
+ * see (`test.runtimeScopes`):
+ *
+ * - NG8001 to NG8004 in a non-standalone component, which gets its scope from an NgModule or from
+ *   `TestBed.configureTestingModule({declarations})`, or in a component declared in a spec file,
+ *   which often gets its imports from `TestBed.overrideComponent`;
+ * - NG8008 in a component declared in a spec file, a test host whose template the spec overrides.
+ *   JIT never checked required inputs.
+ *
+ * A diagnostic belongs to the component whose inline template contains it, or whose `templateUrl`
+ * is the diagnostic's file. One that belongs to no component is kept. Everything else is kept too:
+ * TestBed still throws at runtime for what's really missing, or logs it for an unknown element.
+ */
+export function dropRuntimeScoped(diagnostics: NgpDiagnostic[], file: string, metadata: FileMetadata): NgpDiagnostic[] {
+  const inSpec = SPEC_FILE.test(file);
+  return diagnostics.filter((d) => {
+    const scope = SCOPE_ERRORS.has(d.code);
+    if (!scope && d.code !== MISSING_REQUIRED_INPUTS) {
+      return true;
+    }
+    const component = owner(d, file, metadata);
+    if (!component) {
+      return true;
+    }
+    if (inSpec) {
+      return false;
+    }
+    return !(scope && component.standalone === false);
+  });
+}
+
+/** The component a template diagnostic is in, from its inline template's span or its templateUrl. */
+function owner(d: NgpDiagnostic, file: string, metadata: FileMetadata): NonNullable<ClassMetadata['component']> | undefined {
+  for (const cls of metadata?.classes ?? []) {
+    const component = cls.component;
+    if (!component) {
+      continue;
+    }
+    if (d.filePath && d.filePath !== file) {
+      if (component.templateUrl?.resolvedPath === d.filePath) {
+        return component;
+      }
+    } else if (d.span && component.templateSpan && d.span.start >= component.templateSpan.start && d.span.end <= component.templateSpan.end) {
+      return component;
+    }
+  }
+  return undefined;
 }

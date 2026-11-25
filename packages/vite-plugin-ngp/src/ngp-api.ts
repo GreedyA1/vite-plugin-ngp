@@ -36,6 +36,10 @@ export type FileUpdateType = (typeof FileUpdateType)[keyof typeof FileUpdateType
 export interface ClassMetadata {
   className?: string;
   component?: {
+    /** Whether the component is standalone. NgModule-declared components have `false`. */
+    standalone?: boolean;
+    /** The inline `template` string, as a span of the file. */
+    templateSpan?: {start: number; end: number};
     templateUrl?: {url: string; resolvedPath: string; stringLiteralSpan?: {start: number; end: number}};
     /** ViewEncapsulation as its numeric value. Absent means Emulated. */
     encapsulation?: number;
