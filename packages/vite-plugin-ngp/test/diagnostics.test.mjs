@@ -7,14 +7,17 @@ import * as fs from 'node:fs/promises';
 import {realpathSync} from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import {test} from 'node:test';
+import {describe, test} from 'node:test';
 import {fileURLToPath} from 'node:url';
+import {createServer} from 'vite';
 import {NgpCompiler} from '../dist/compiler.js';
+import {ngp} from '../dist/index.js';
+import {copyFixture, recordingLogger, toolchain} from './fixture.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const repo = path.resolve(here, '../../..');
 const fixture = path.join(here, 'fixtures/file-changes');
-const toolchainDir = process.env.NGP_TOOLCHAIN ?? path.join(repo, 'toolchain/out');
+const toolchainDir = toolchain;
 
 /**
  * Compiles `code` as the fixture app's `greeting.ts`, with `angularCompilerOptions` added to the
@@ -93,4 +96,67 @@ test('a mistyped extendedDiagnostics check fails at startup instead of silently 
     diagnose(uninvokedSignal, {extendedDiagnostics: {checks: {interpolatedSignalNotInvokd: 'error'}}}),
     /NG\d+: Angular compiler option "extendedDiagnostics\.checks" has an unknown check: "interpolatedSignalNotInvokd"/,
   );
+});
+
+// A diagnostic in an external template carries an offset into the .html file. Vite's dev server,
+// which Vitest runs, used to read that offset against the .ts module: past the module's end it
+// threw, so a warning failed the module, and short of it the frame showed the wrong file.
+describe('a diagnostic in an external template', () => {
+  // The interpolated signal sits on line 41, far past the end of the 200-byte component.
+  const template = `${'<p>padding</p>\n'.repeat(40)}<p>{{ count }}</p>\n`;
+  const component = `import {Component, signal} from '@angular/core';
+
+@Component({selector: 'app-greeting', templateUrl: './greeting.html'})
+export class Greeting {
+  count = signal(0);
+}
+`;
+
+  /** Serves the fixture with `greeting.html` as above, and transforms `greeting.ts`. */
+  async function transformGreeting(label, angularCompilerOptions = {}) {
+    const root = await copyFixture('file-changes', `diagnostics-${label}`);
+    await fs.writeFile(path.join(root, 'src/app/greeting.ts'), component);
+    await fs.writeFile(path.join(root, 'src/app/greeting.html'), template);
+    const tsconfig = path.join(root, 'tsconfig.json');
+    const config = JSON.parse(await fs.readFile(tsconfig, 'utf8'));
+    config.angularCompilerOptions = {...config.angularCompilerOptions, ...angularCompilerOptions};
+    await fs.writeFile(tsconfig, JSON.stringify(config));
+    const {logger, messages} = recordingLogger();
+    const server = await createServer({
+      root,
+      cacheDir: path.join(root, '.vite'),
+      configFile: false,
+      customLogger: logger,
+      plugins: [ngp({toolchain, typeCheck: false})],
+      server: {middlewareMode: true, ws: false},
+    });
+    try {
+      const outcome = await server.environments.client.transformRequest('/src/app/greeting.ts').then(
+        (result) => ({result}),
+        (error) => ({error}),
+      );
+      return {...outcome, messages};
+    } finally {
+      await server.close();
+      await fs.rm(root, {recursive: true, force: true});
+    }
+  }
+
+  test('is a warning that names the template line, and the module still compiles', async () => {
+    const {result, error, messages} = await transformGreeting('warning');
+    assert.equal(error, undefined);
+    assert.match(result.code, /Greeting/);
+    const warning = messages.warnings.find((w) => w.includes('NG8109'));
+    assert.ok(warning, `no NG8109 warning in:\n${messages.warnings.join('\n')}`);
+    assert.match(warning, /src\/app\/greeting\.html:41:7: NG8109: count is a function and should be invoked/);
+    assert.deepEqual(messages.errors, []);
+  });
+
+  test('set to error, fails the module with the template line and nothing else', async () => {
+    const {error, messages} = await transformGreeting('error', {extendedDiagnostics: {defaultCategory: 'error'}});
+    assert.ok(error, 'the module should fail');
+    assert.match(error.message, /src\/app\/greeting\.html:41:7: NG8109: /);
+    // Vite logs a crash in its own error handler as an error; the diagnostic itself is the throw.
+    assert.deepEqual(messages.errors, []);
+  });
 });

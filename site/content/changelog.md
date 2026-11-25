@@ -7,6 +7,12 @@ description: What changed in vite-plugin-ngp, newest first, for anyone following
 
 What changed in vite-plugin-ngp, newest first, written for people using it. Every entry links to the page that documents it. Versions on npm, with the commits in each, are in the repo's [CHANGELOG.md](https://github.com/push-based/vite-plugin-ngp/blob/main/CHANGELOG.md) and its [GitHub releases](https://github.com/push-based/vite-plugin-ngp/releases).
 
+## 25 November 2026
+
+### Fixes
+
+- An extended diagnostic in an external template, such as NG8109 for an uninvoked signal in `counter.html`, no longer breaks the component under the dev server or Vitest. Vite read the template offset as one into the `.ts` module, so the frame showed the wrong line, and an offset past the module's end threw and failed the module over a warning. The message now starts with the template's `path:line:column`, and a warning stays a warning. [Type-checking](type-checking#angulars-extended-diagnostics)
+
 ## 17 November 2026
 
 ### Angular
