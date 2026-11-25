@@ -99,7 +99,8 @@ export async function toolchainId(toolchainDir: string): Promise<string> {
   const files = (await fs.readdir(dir, {recursive: true})).filter((name) => name.endsWith('.js')).sort();
   const hash = createHash('sha256');
   for (const name of files) {
-    // Separators as `/`, so the same build hashes the same on every platform.
+    // Names hashed with `/` as the separator. The order isn't portable yet: `files` is sorted
+    // with the platform's own separator, so Windows can order a build differently (#50).
     hash.update(name.split(path.sep).join('/')).update('\0').update(await fs.readFile(path.join(dir, name))).update('\0');
   }
   return `preprocessor:${hash.digest('hex')}`;
